@@ -35,3 +35,7 @@ After the first deploy:
 ## Notes
 - Replace placeholder product data in `/app/products/page.tsx` and `/app/products/[id]/page.tsx`
 - Replace `/public/logo.jpg` with your preferred logo file.
+
+
+
+.
