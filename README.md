@@ -32,10 +32,7 @@ After the first deploy:
   - `STRIPE_PUBLISHABLE_KEY=...`
 - Implement Stripe Checkout in `/app/checkout`
 
+
 ## Notes
 - Replace placeholder product data in `/app/products/page.tsx` and `/app/products/[id]/page.tsx`
 - Replace `/public/logo.jpg` with your preferred logo file.
-
-
-
-.
