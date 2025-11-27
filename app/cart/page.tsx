@@ -1,9 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-
-feature/shadow-org
 import { useRouter } from "next/navigation";
 import { useCart } from "../context/cart-context";
 import { getSupabaseClient } from "../lib/supabaseClient";

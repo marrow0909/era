@@ -1,9 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-
- feature/shadow-org
 import React, { useEffect, useState } from "react";
 import { getSupabaseClient } from "../lib/supabaseClient";
 
