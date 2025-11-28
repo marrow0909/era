@@ -1,18 +1,26 @@
 // app/api/checkout/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // Stripe クライアント
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
 });
 
-// Supabase（サーバー側専用）
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string
-);
+// Supabase Admin クライアント（遅延生成版）
+function getSupabaseAdmin(): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error(
+      "Supabase admin env vars (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY) are not set."
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 type CartItem = {
   id: string;
@@ -75,24 +83,31 @@ export async function POST(req: Request) {
       cancel_url: `${baseUrl}/cart`,
     });
 
-    // ユーザーがわかる時だけ Supabase に注文保存
+    // Supabase に注文保存（userId と session.id がある時だけ）
     if (userId && session.id) {
-      const total = items.reduce(
-        (sum, it) => sum + it.price * it.quantity,
-        0
-      );
-      const number = generateOrderNumber();
-      const itemsSummary = buildItemsSummary(items);
+      try {
+        const supabaseAdmin = getSupabaseAdmin();
 
-      await supabaseAdmin.from("orders").insert({
-        user_id: userId,
-        number,
-        total,
-        currency: "JPY",
-        status: "PENDING",
-        items_summary: itemsSummary,
-        stripe_session_id: session.id,
-      });
+        const total = items.reduce(
+          (sum, it) => sum + it.price * it.quantity,
+          0
+        );
+        const number = generateOrderNumber();
+        const itemsSummary = buildItemsSummary(items);
+
+        await supabaseAdmin.from("orders").insert({
+          user_id: userId,
+          number,
+          total,
+          currency: "JPY",
+          status: "PENDING",
+          items_summary: itemsSummary,
+          stripe_session_id: session.id,
+        });
+      } catch (e) {
+        console.error("[checkout] Failed to store order in Supabase:", e);
+        // ここで throw すると決済自体もできなくなるので、ログだけ残して続行
+      }
     } else {
       console.warn(
         "[checkout] userId or session.id missing, order not stored.",
