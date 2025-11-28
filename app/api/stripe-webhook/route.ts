@@ -1,18 +1,28 @@
 // app/api/stripe-webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-export const runtime = "nodejs"; // Edgeじゃなく Node で動かす
+export const runtime = "nodejs"; // EdgeではなくNodeで動かす
 
+// Stripe クライアント
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
 });
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string
-);
+// Supabase Admin クライアント（遅延生成：import時には実行されない）
+function getSupabaseAdmin(): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error(
+      "Supabase admin env vars (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY) are not set."
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
@@ -30,7 +40,7 @@ export async function POST(req: Request) {
     });
   }
 
-  let event: any;
+  let event: Stripe.Event;
 
   try {
     const body = await req.arrayBuffer();
@@ -44,39 +54,37 @@ export async function POST(req: Request) {
     );
   }
 
-  // イベントタイプによって分岐
+  // イベントタイプごとの処理
   switch (event.type) {
     case "checkout.session.completed": {
-      const session = event.data.object as any;
-      const sessionId = session.id as string;
+      const session = event.data.object as Stripe.Checkout.Session;
+      const sessionId = session.id;
 
       try {
-        // この session に紐づく注文を PAID に更新
+        const supabaseAdmin = getSupabaseAdmin();
+
         const { error } = await supabaseAdmin
           .from("orders")
           .update({ status: "PAID" })
           .eq("stripe_session_id", sessionId);
 
         if (error) {
-          console.error(
-            "Failed to update order status to PAID:",
-            error
-          );
+          console.error("Failed to update order status to PAID:", error);
         } else {
-          console.log(
-            "✅ Order marked as PAID for session:",
-            sessionId
-          );
+          console.log("✅ Order marked as PAID for session:", sessionId);
         }
       } catch (e) {
-        console.error("Unexpected error while updating order status:", e);
+        // ここで落とすと webhook 自体が 500 になるので log だけ
+        console.error(
+          "Unexpected error while updating order status (Supabase admin not configured?)",
+          e
+        );
       }
 
       break;
     }
 
     default: {
-      // 他のイベントは一旦ログだけ
       console.log(`Unhandled event type ${event.type}`);
     }
   }
