@@ -1,76 +1,118 @@
 // app/api/checkout/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("STRIPE_SECRET_KEY is not set in .env.local");
-}
+// Stripe クライアント
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: "2025-11-17.clover",
+});
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
-
+// Supabase（サーバー側専用）
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+  process.env.SUPABASE_SERVICE_ROLE_KEY as string
+);
 
 type CartItem = {
   id: string;
   name: string;
-  price: number;    // JPY（例: 12000）
+  price: number; // 円 (例: 19800)
   quantity: number;
 };
 
+// 注文番号生成
+function generateOrderNumber(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const rand = Math.floor(Math.random() * 9000) + 1000;
+  return `ERA-${y}${m}${d}-${rand}`;
+}
+
+// カート概要テキスト
+function buildItemsSummary(items: CartItem[]): string {
+  if (!items.length) return "";
+  const text = items
+    .map((it) => `${it.name} ×${it.quantity}`)
+    .join(", ");
+  return text.length > 280 ? text.slice(0, 277) + "..." : text;
+}
+
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { items?: CartItem[] };
-
-    const items = body.items || [];
+    const body = await req.json();
+    const items: CartItem[] = body.items ?? [];
+    const userId: string | undefined = body.userId;
+    const baseUrl =
+      process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
     if (!items.length) {
       return NextResponse.json(
-        { error: "カートが空です。" },
+        { error: "Cart is empty" },
         { status: 400 }
       );
     }
 
-    // Stripe に渡す line_items を組み立て
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map(
-      (item) => ({
-        quantity: item.quantity,
-        price_data: {
-          currency: "jpy",
-          product_data: {
-            name: item.name,
-          },
-          // Stripe は最小単位（JPY は「円」そのまま）
-          unit_amount: item.price,
+    // Stripe 用 line_items
+    const lineItems = items.map((item) => ({
+      price_data: {
+        currency: "jpy",
+        product_data: {
+          name: item.name,
         },
-      })
-    );
+        unit_amount: item.price,
+      },
+      quantity: item.quantity,
+    }));
 
+    // Stripe セッション作成
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${
-        process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
-      }/cart?status=success`,
-      cancel_url: `${
-        process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
-      }/cart?status=cancel`,
+      success_url: `${baseUrl}/sucess`,
+      cancel_url: `${baseUrl}/cart`,
     });
+
+    // ユーザーがわかる時だけ Supabase に注文保存
+    if (userId && session.id) {
+      const total = items.reduce(
+        (sum, it) => sum + it.price * it.quantity,
+        0
+      );
+      const number = generateOrderNumber();
+      const itemsSummary = buildItemsSummary(items);
+
+      await supabaseAdmin.from("orders").insert({
+        user_id: userId,
+        number,
+        total,
+        currency: "JPY",
+        status: "PENDING",
+        items_summary: itemsSummary,
+        stripe_session_id: session.id,
+      });
+    } else {
+      console.warn(
+        "[checkout] userId or session.id missing, order not stored.",
+        { userId, sessionId: session.id }
+      );
+    }
 
     if (!session.url) {
       return NextResponse.json(
-        { error: "Stripe から URL が返ってきませんでした" },
+        { error: "Stripe did not return a URL" },
         { status: 500 }
       );
     }
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
-    console.error("Stripe error:", err);
+  } catch (err) {
+    console.error("[checkout] error", err);
     return NextResponse.json(
-      {
-        error: err?.message || "Unknown error",
-      },
-      { status: 400 }
+      { error: "Failed to create checkout session" },
+      { status: 500 }
     );
   }
 }

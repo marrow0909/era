@@ -1,3 +1,4 @@
+// app/products/page.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -7,16 +8,30 @@ import {
   CATEGORY_FILTERS,
   type CategoryFilterId,
   type Product,
+  type Gender,
 } from "../lib/products-data";
+
+// 性別フィルター用
+type GenderFilterId = "ALL" | Gender;
 
 export default function ProductsPage() {
   const [activeCategory, setActiveCategory] =
     useState<CategoryFilterId>("ALL");
+  const [activeGender, setActiveGender] = useState<GenderFilterId>("ALL");
 
   const filteredProducts = useMemo(() => {
-    if (activeCategory === "ALL") return PRODUCTS;
-    return PRODUCTS.filter((p) => p.category === activeCategory);
-  }, [activeCategory]);
+    let result = PRODUCTS;
+
+    if (activeCategory !== "ALL") {
+      result = result.filter((p) => p.category === activeCategory);
+    }
+
+    if (activeGender !== "ALL") {
+      result = result.filter((p) => p.gender === activeGender);
+    }
+
+    return result;
+  }, [activeCategory, activeGender]);
 
   return (
     <div
@@ -72,7 +87,47 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      {/* カテゴリーバー */}
+      {/* 性別フィルター（大枠：男・女・ユニセックス） */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 10,
+          fontSize: 11,
+        }}
+      >
+        {(
+          [
+            { id: "ALL", label: "All" },
+            { id: "MEN", label: "Men" },
+            { id: "WOMEN", label: "Women" },
+            { id: "UNISEX", label: "Unisex" },
+          ] as { id: GenderFilterId; label: string }[]
+        ).map((g) => {
+          const active = activeGender === g.id;
+          return (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setActiveGender(g.id)}
+              style={{
+                borderRadius: 999,
+                border: "1px solid #111827",
+                background: active ? "#facc15" : "transparent",
+                color: active ? "#111827" : "#e5e7eb",
+                padding: "5px 14px",
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              {g.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* カテゴリーバー（Tops / Jackets / Pants / Accessories） */}
       <div
         style={{
           borderRadius: 999,
@@ -145,6 +200,26 @@ function ProductCard({ product }: { product: Product }) {
       ? "Accessory"
       : "Item";
 
+  const genderLabel =
+    product.gender === "MEN"
+      ? "Men"
+      : product.gender === "WOMEN"
+      ? "Women"
+      : "Unisex";
+
+  const roundedRating = product.rating > 0 ? Math.round(product.rating * 2) / 2 : 0;
+  const fullStars = Math.floor(roundedRating);
+  const halfStar = roundedRating - fullStars >= 0.5;
+
+  const starText =
+    roundedRating === 0
+      ? "No reviews yet"
+      : "★".repeat(fullStars) +
+        (halfStar ? "½" : "") +
+        `  (${product.rating.toFixed(1)} / 5, ${product.reviewCount})`;
+
+  const isSoon = product.tag === "Soon";
+
   return (
     <div
       style={{
@@ -159,14 +234,6 @@ function ProductCard({ product }: { product: Product }) {
         transition: "transform 0.16s ease, box-shadow 0.16s ease",
       }}
     >
-      {/* ホバーで少し浮く */}
-      <style jsx>{`
-        div:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
-        }
-      `}</style>
-
       {/* 画像プレースホルダー */}
       <div
         style={{
@@ -184,7 +251,7 @@ function ProductCard({ product }: { product: Product }) {
           color: "#6b7280",
         }}
       >
-        {product.tag === "Soon" ? "SOON" : "ERA"}
+        {isSoon ? "SOON" : "ERA"}
       </div>
 
       {/* テキスト部分 */}
@@ -203,7 +270,7 @@ function ProductCard({ product }: { product: Product }) {
             color: "#9ca3af",
           }}
         >
-          {categoryLabel}
+          {categoryLabel} • {genderLabel}
         </div>
 
         <div
@@ -224,6 +291,18 @@ function ProductCard({ product }: { product: Product }) {
           ¥{product.price.toLocaleString("ja-JP")}
         </div>
 
+        {/* レビュー表示 */}
+        <div
+          style={{
+            fontSize: 11,
+            color: product.rating > 0 ? "#facc15" : "#6b7280",
+            marginTop: 2,
+          }}
+        >
+          {starText}
+        </div>
+
+        {/* タグ（New / Soon / Limited） */}
         {product.tag && (
           <div
             style={{
@@ -231,7 +310,7 @@ function ProductCard({ product }: { product: Product }) {
               fontSize: 10,
               textTransform: "uppercase",
               letterSpacing: "0.16em",
-              color: "#facc15",
+              color: product.tag === "Soon" ? "#f97373" : "#facc15",
             }}
           >
             {product.tag}
